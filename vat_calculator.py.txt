@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+VAT Calculator (Tkinter)
+- Reads countries_vat.json for country -> standard VAT % mapping
+- Country dropdown (UN member states only)
+- Manual VAT override allowed
+- Works when ANY ONE or TWO of the fields (amount, vat, total) are entered
+- Displays VAT amount (tax component)
+"""
+import json
+import os
+import tkinter as tk
+from tkinter import ttk
+
+HERE = os.path.dirname(os.path.abspath(_file_))
+DATA_FILE = os.path.join(HERE, 'countries_vat.json')
+
+DEFAULT_COUNTRY_VAT = {
+    "Nepal": 13.0,
+    "India": 18.0,
+    "United Kingdom": 20.0,
+    "United States": 0.0,
+    "Australia": 10.0,
+    "Japan": 10.0,
+    "Germany": 19.0,
+    "France": 20.0,
+    "China": 13.0,
+    "Canada": 5.0
+}
+
+def load_country_vat():
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            clean = {k: float(v) for k, v in data.items() if isinstance(v, (int,float))}
+            if not clean:
+                return DEFAULT_COUNTRY_VAT
+            return dict(sorted(clean.items()))
+    except Exception:
+        return dict(sorted(DEFAULT_COUNTRY_VAT.items()))
+
+def _parse_number(s):
+    try:
+        if not s:
+            return None
+        cleaned = s.replace(',', '').strip()
+        return float(cleaned)
+    except Exception:
+        return None
+
+class VATCalculatorApp(tk.Tk):
+    def _init_(self, country_vat_map):
+        super()._init_()
+        self.title('VAT Calculator — Lite')
+        self.geometry('420x230')
+        self.resizable(False, False)
+
+        self.country_vat_map = country_vat_map
+        self.country_names = list(self.country_vat_map.keys())
+
+        self.var_amount = tk.StringVar()
+        self.var_vat = tk.StringVar()
+        self.var_total = tk.StringVar()
+        self.var_vat_amount = tk.StringVar()
+        self.var_country = tk.StringVar()
+        self.var_manual_vat = tk.StringVar()
+
+        if 'Nepal' in self.country_names:
+            self.var_country.set('Nepal')
+        elif self.country_names:
+            self.var_country.set(self.country_names[0])
+        else:
+            self.var_country.set('Manual')
+
+        self._build_ui()
+        self._bind_events()
+        self._update_vat_from_country()
+
+    def _build_ui(self):
+        pad = {'padx': 10, 'pady': 6}
+
+        ttk.Label(self, text='Country:').place(x=10, y=10)
+        self.combo_country = ttk.Combobox(self, values=self.country_names, textvariable=self.var_country, state='readonly')
+        self.combo_country.place(x=80, y=10, width=220)
+
+        ttk.Label(self, text='VAT % (manual):').place(x=310, y=10)
+        self.entry_manual_vat = ttk.Entry(self, textvariable=self.var_manual_vat)
+        self.entry_manual_vat.place(x=310, y=30, width=90)
+
+        ttk.Label(self, text='Amount (No VAT):').place(x=10, y=60)
+        self.entry_amount = ttk.Entry(self, textvariable=self.var_amount)
+        self.entry_amount.place(x=140, y=60, width=260)
+
+        ttk.Label(self, text='VAT %:').place(x=10, y=95)
+        self.entry_vat = ttk.Entry(self, textvariable=self.var_vat)
+        self.entry_vat.place(x=140, y=95, width=260)
+
+        ttk.Label(self, text='Amount with VAT:').place(x=10, y=130)
+        self.entry_total = ttk.Entry(self, textvariable=self.var_total)
+        self.entry_total.place(x=140, y=130, width=260)
+
+        ttk.Label(self, text='VAT amount:').place(x=10, y=165)
+        self.label_vat_amount = ttk.Label(self, textvariable=self.var_vat_amount)
+        self.label_vat_amount.place(x=140, y=165)
+
+        self.btn_clear = ttk.Button(self, text='Clear', command=self.clear_all)
+        self.btn_clear.place(x=300, y=165, width=100)
+
+        self.help_label = ttk.Label(self, text='Enter any ONE field (Amount or VAT% or Total) and results auto-calc', foreground='gray')
+        self.help_label.place(x=10, y=195)
+
+    def _bind_events(self):
+        self.combo_country.bind('<<ComboboxSelected>>', lambda e: self._update_vat_from_country())
+        self.entry_manual_vat.bind('<KeyRelease>', lambda e: self._manual_vat_changed())
+        for w in (self.entry_amount, self.entry_vat, self.entry_total):
+            w.bind('<KeyRelease>', lambda e: self._on_input_change())
+
+    def _update_vat_from_country(self):
+        c = self.var_country.get()
+        if c in self.country_vat_map:
+            rate = self.country_vat_map[c]
+            if not self.var_manual_vat.get():
+                self.var_vat.set(f"{rate:.2f}")
+        self._on_input_change()
+
+    def _manual_vat_changed(self):
+        mv = self.var_manual_vat.get().strip()
+        if mv:
+            try:
+                v = float(mv)
+                self.var_vat.set(f"{v:.4g}")
+            except Exception:
+                pass
+        else:
+            self._update_vat_from_country()
+        self._on_input_change()
+
+    def _on_input_change(self):
+        a = self.var_amount.get().strip()
+        v = self.var_vat.get().strip()
+        t = self.var_total.get().strip()
+
+        a_val = _parse_number(a)
+        v_val = _parse_number(v)
+        t_val = _parse_number(t)
+
+        provided = sum(x is not None for x in (a_val, v_val, t_val))
+
+        try:
+            if provided == 0:
+                self.var_vat_amount.set('')
+                return
+
+            if provided >= 2:
+                if a_val is None:
+                    if v_val is None or t_val is None:
+                        return
+                    amount = t_val / (1 + v_val / 100.0)
+                    self.var_amount.set(f"{amount:.2f}")
+                    vat_amount = t_val - amount
+                    self.var_vat_amount.set(f"{vat_amount:.2f}")
+                elif v_val is None:
+                    if a_val == 0:
+                        self.var_vat.set('0')
+                        self.var_vat_amount.set('0')
+                        return
+                    vat_percent = ((t_val / a_val) - 1) * 100 if t_val is not None else None
+                    if vat_percent is not None:
+                        self.var_vat.set(f"{vat_percent:.2f}")
+                        vat_amount = t_val - a_val
+                        self.var_vat_amount.set(f"{vat_amount:.2f}")
+                elif t_val is None:
+                    total = a_val * (1 + v_val / 100.0)
+                    self.var_total.set(f"{total:.2f}")
+                    vat_amount = total - a_val
+                    self.var_vat_amount.set(f"{vat_amount:.2f}")
+            else:
+                if a_val is not None and v_val is None and t_val is None:
+                    vat_rate = self._current_vat_rate()
+                    total = a_val * (1 + vat_rate / 100.0)
+                    self.var_vat.set(f"{vat_rate:.2f}")
+                    self.var_total.set(f"{total:.2f}")
+                    vat_amount = total - a_val
+                    self.var_vat_amount.set(f"{vat_amount:.2f}")
+                elif v_val is not None and a_val is None and t_val is None:
+                    default_amount = 100.0
+                    total = default_amount * (1 + v_val / 100.0)
+                    self.var_amount.set(f"{default_amount:.2f}")
+                    self.var_total.set(f"{total:.2f}")
+                    vat_amount = total - default_amount
+                    self.var_vat_amount.set(f"{vat_amount:.2f}")
+                elif t_val is not None and a_val is None and v_val is None:
+                    vat_rate = self._current_vat_rate()
+                    amount = t_val / (1 + vat_rate / 100.0)
+                    self.var_amount.set(f"{amount:.2f}")
+                    self.var_vat.set(f"{vat_rate:.2f}")
+                    vat_amount = t_val - amount
+                    self.var_vat_amount.set(f"{vat_amount:.2f}")
+        except Exception:
+            pass
+
+    def _current_vat_rate(self):
+        mv = self.var_manual_vat.get().strip()
+        if mv:
+            try:
+                return float(mv)
+            except Exception:
+                pass
+        c = self.var_country.get()
+        if c in self.country_vat_map:
+            return float(self.country_vat_map[c])
+        return 0.0
+
+    def clear_all(self):
+        self.var_amount.set('')
+        self.var_vat.set('')
+        self.var_total.set('')
+        self.var_vat_amount.set('')
+        self.var_manual_vat.set('')
+
+def main():
+    country_map = load_country_vat()
+    app = VATCalculatorApp(country_map)
+    app.mainloop()
+
+if _name_ == '_main_':
+    main()
